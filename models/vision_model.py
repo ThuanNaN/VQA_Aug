@@ -3,15 +3,17 @@ from torch import nn, Tensor
 from transformers import DeiTModel, DeiTImageProcessor
 from .configuration import VisionConfig
 
-
 class VisionModel(nn.Module):
     config: VisionConfig = VisionConfig()
     def __init__(self):
         super(VisionModel, self).__init__()
         self.config = VisionModel.config
         self.model = DeiTModel.from_pretrained(self.config.model_name,
-                                               attn_implementation="sdpa", 
-                                               torch_dtype=self.config.torch_dtype)
+                                               attn_implementation="sdpa")
+        # disable grad for model except for deit.pooler.dense
+        for name, param in self.model.named_parameters():
+            param.requires_grad = 'pooler.dense' in name
+            
         self.projection = nn.Sequential(
             nn.Linear(self.config.hidden_size, self.config.projection_dim),
             nn.ReLU()

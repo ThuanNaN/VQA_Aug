@@ -4,7 +4,7 @@ import torch
 import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset
-from utils import AppPath
+from utils import DataPath
 from torchvision import transforms
 
 
@@ -20,7 +20,7 @@ class ViVQADataset(Dataset):
                     is_img_augment=False,
                     n_img_augments=1, 
                     )-> None:
-        self.vivqa_dir = AppPath.ViVQA_PATH
+        self.vivqa_dir = DataPath.ViVQA_PATH
         self.data_path = data_path
         self.data_mode = data_mode
         self.is_text_augment = is_text_augment

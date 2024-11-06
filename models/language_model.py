@@ -35,6 +35,9 @@ class LanguageModel(nn.Module):
         super(LanguageModel, self).__init__()
         self.config = LanguageModel.config
         self.model = AutoModel.from_pretrained(self.config.model_name)
+        # disable grad for model
+        for param in self.model.parameters():
+            param.requires_grad = False
         self.projection = nn.Sequential(
             nn.Linear(self.config.hidden_size, self.config.projection_dim),
             nn.ReLU()
@@ -51,7 +54,6 @@ class LanguageModel(nn.Module):
         else:
             x = self.model(**inputs[0])
             x = x['last_hidden_state'][:, 0, :] # (batch, hidden_size)
-
         return self.projection(x)
 
     @staticmethod

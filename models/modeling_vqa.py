@@ -24,7 +24,6 @@ class MLP(nn.Module):
         x = self.fc2(x)
         return x
 
-
 class VQAModel(nn.Module):
     config: VQAConfig = VQAConfig()
     def __init__(self):
@@ -39,8 +38,6 @@ class VQAModel(nn.Module):
                 img_inputs_lst: Tensor
                 )-> Tensor:
         language_thresh, vision_thresh = self.get_threshold()
-
-        
         language_output = self.language_model(text_inputs_lst, language_thresh) # (batch, 512)
         vision_output = self.vision_model(img_inputs_lst, vision_thresh) # (batch, 512)
         logits = self.mlp(language_output, vision_output)
@@ -56,16 +53,4 @@ class VQAModel(nn.Module):
         # updated_thresh = max(self.start_threshold - decay, self.min_threshold)
 
         # return updated_thresh, updated_thresh
-
-
-    def get_img_processor(self):
-        pass
-
-    def get_text_processor(self):
-        pass
-
-    def get_vqa_head(self):
-        pass
-
-
 

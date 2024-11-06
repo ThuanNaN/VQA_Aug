@@ -1,7 +1,7 @@
 import argparse
 import pandas as pd
 from tqdm import tqdm
-from utils import seed_everything, AppPath
+from utils import seed_everything, DataPath
 import torch
 from transformers import MT5Tokenizer, MT5ForConditionalGeneration
 import pandas as pd
@@ -87,8 +87,8 @@ def generate_paraphrases(data_filepath, num_paraphrase, filter_method, from_inde
 
 
 def generate_answer_space():
-    train_csv_path = AppPath.ViVQA_PATH / 'train.csv'
-    test_csv_path = AppPath.ViVQA_PATH / 'test.csv'
+    train_csv_path = DataPath.ViVQA_PATH / 'train.csv'
+    test_csv_path = DataPath.ViVQA_PATH / 'test.csv'
 
     train_df = pd.read_csv(train_csv_path)
     test_df = pd.read_csv(test_csv_path)
@@ -98,7 +98,7 @@ def generate_answer_space():
     
     answer_space = set(list(train_answers + test_answers))
 
-    save_path =  AppPath.ViVQA_PATH / 'answer_space.txt'
+    save_path =  DataPath.ViVQA_PATH / 'answer_space.txt'
 
     with open(save_path, 'w+') as f:
         f.write('\n'.join(answer_space))
