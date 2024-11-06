@@ -4,7 +4,8 @@ from utils import (
     seed_everything, 
     get_label_encoder, 
     colorstr, 
-    save_model_ckpt
+    save_model_ckpt,
+    set_threads
 )
 from tqdm import tqdm
 import time
@@ -13,14 +14,15 @@ import logging
 import copy
 import wandb
 import torch
-from torch import nn
+from torch import nn, optim
+import pytorch_warmup as warmup
 from data_loader import ViVQADataset
 from torch.utils.data import DataLoader
 from models import VQAModel, VQAProcessor
 
 logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(format="%(message)s", level=logging.INFO)
-LOGGER = logging.getLogger("PyTorch-CLS")
+LOGGER = logging.getLogger("VQA Training")
 
 @dataclass
 class BaseTrainingConfig:
@@ -34,7 +36,10 @@ class BaseTrainingConfig:
     train_batch_size: int = 32
     val_batch_size: int = 32
     epochs: int = 30
+    warmup_steps: int = 1000
     lr: float = 1e-3
+    lr_min: float = 1e-5
+    scheluder_interval: int = 3
     weight_decay: float = 1e-4
     use_amp: bool = True
     wandb_log: bool = False
@@ -42,18 +47,21 @@ class BaseTrainingConfig:
     run_name: str = "exp"
     save_ckpt: bool = True
     device_ids: int = 0
+    num_workers: int = 4
 
 
 def train_model(
         model,
+        scaler,
         criterion,
         optimizer,
-        scaler,
         lr_scheduler,
+        warmup_scheduler,
+        warmup_period,
         dataloaders,
         epochs,
         device,
-        use_amp=False,
+        use_amp=True,
         args=None,
 ):
     since = time.perf_counter()
@@ -63,13 +71,15 @@ def train_model(
     if lr_scheduler:
         LOGGER.info(
             f"\n{colorstr('LR Scheduler:')} {type(lr_scheduler).__name__}")
+    if warmup_scheduler:
+        LOGGER.info(
+            f"\n{colorstr('Warmup Scheduler:')} {type(warmup_scheduler).__name__}")
     
     LOGGER.info(f"\n{colorstr('Loss:')} {type(criterion).__name__}")
 
     history = {"train_loss": [], "train_acc": [],
                "val_loss": [], "val_acc": [], "lr": []}
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_model_optim = copy.deepcopy(optimizer.state_dict())
     best_val_acc = 0.0
 
     for epoch in range(epochs):
@@ -90,7 +100,6 @@ def train_model(
                           total=len(dataloaders[phase]),
                           bar_format='{desc} {percentage:>7.0f}%|{bar:10}{r_bar}{bar:-10b}',
                           unit='batch')
-
             for batch in _phase:
                 text_inputs_lst = [
                     {
@@ -104,10 +113,9 @@ def train_model(
 
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == "train"):
-                    with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+                    with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
                         logits = model(text_inputs_lst, img_inputs_lst)
                         loss = criterion(logits, labels)
-
                         if phase == 'train':
                             scaler.scale(loss).backward()
                             scaler.step(optimizer)
@@ -115,7 +123,9 @@ def train_model(
                             history['lr'].append(lr_scheduler.optimizer.param_groups[0]
                                 ["lr"]) if lr_scheduler else history['lr'].append(args.lr)
                             if lr_scheduler is not None:
-                                lr_scheduler.step()
+                                with warmup_scheduler.dampening():
+                                    if warmup_scheduler.last_step + 1 >= warmup_period:
+                                        lr_scheduler.step()
 
                 _, preds = torch.max(logits, 1)
                 running_items += labels.size(0)
@@ -123,6 +133,7 @@ def train_model(
                 running_corrects += torch.sum(preds == labels.data)
                 epoch_loss = running_loss / running_items
                 epoch_acc = running_corrects / running_items
+
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}GB'
                 desc = ('%35s' + '%15.6g' * 2) % (mem, running_loss /
                                                   running_items, running_corrects / running_items)
@@ -146,17 +157,16 @@ def train_model(
                 if epoch_acc > best_val_acc:
                     best_val_acc = epoch_acc
                     best_model_wts = copy.deepcopy(model.state_dict())
-                    # best_model_optim = copy.deepcopy(optimizer.state_dict())
                     if args.save_ckpt:
                         # save_model_ckpt(model, DIR_SAVE, "best.pt")
                         pass
 
     time_elapsed = time.perf_counter() - since
-    LOGGER.info(f"Training complete in {time_elapsed // 3600}h {time_elapsed % 3600 // 60}m { time_elapsed % 60}s with {epochs} epochs")
-    LOGGER.info(f"Best val Acc: {round(best_val_acc.item(), 6)}")
+    LOGGER.info(f"Training complete in {time_elapsed // 3600}h {time_elapsed % 3600 // 60}m {time_elapsed % 60//1}s with {epochs} epochs")
+    LOGGER.info(f"Best val Acc: {round(best_val_acc, 6)}")
 
     model.load_state_dict(best_model_wts)
-    return model, best_val_acc.item()
+    return model, best_val_acc, history
 
 
 def main():
@@ -206,6 +216,14 @@ def main():
                         type=float,
                         default=base_config.lr,
                         help='Learning rate')
+    parser.add_argument('--lr_min',
+                        type=float,
+                        default=base_config.lr_min,
+                        help='Minimum learning rate')
+    parser.add_argument('--scheluder_interval',
+                        type=int,
+                        default=base_config.scheluder_interval,
+                        help='Scheduler interval')
     parser.add_argument('--weight_decay',
                         type=float,
                         default=base_config.weight_decay,
@@ -234,9 +252,18 @@ def main():
                         type=int,
                         default=base_config.device_ids,
                         help='Number of device ids')
+    parser.add_argument('--warmup_steps',
+                        type=int,
+                        default=base_config.warmup_steps,
+                        help='Warmup steps')
+    parser.add_argument('--num_workers',
+                        type=int,
+                        default=base_config.num_workers,
+                        help='Number of workers')
     args = parser.parse_args()
 
     seed_everything(args.seed)
+    set_threads(args.num_workers)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device_ids)
 
     device = "cuda" if torch.cuda.is_available() else 'cpu'
@@ -280,12 +307,15 @@ def main():
     train_loader = DataLoader(train_dataset,
                               batch_size=args.train_batch_size,
                               pin_memory=True,
-                              shuffle=True)
+                              shuffle=True,
+                              num_workers=args.num_workers)
 
     test_loader = DataLoader(test_dataset,
                              batch_size=args.val_batch_size,
                              pin_memory=True,
-                             shuffle=False)
+                             shuffle=False,
+                             num_workers=args.num_workers)
+
     dataloaders = {
         "train": train_loader,
         "val": test_loader
@@ -299,20 +329,42 @@ def main():
     LOGGER.info(f"Total Parameters: {total_params // 1e6}M")
     LOGGER.info(f"Trainable Parameters: {trainable_params // 1e6}M")
 
-    optimizer = torch.optim.Adam(model.parameters(),
-                                 lr=args.lr,
-                                 weight_decay=args.weight_decay)
+
+    steps_per_epoch = len(train_loader)
+    total_steps = steps_per_epoch * args.epochs
+    warmup_period = args.warmup_steps
+    num_steps = total_steps - warmup_period
+    t0 = num_steps // args.scheluder_interval
+
+    optimizer = optim.Adam(model.parameters(),
+                     lr=args.lr,
+                     weight_decay=args.weight_decay)
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,
+                                                                  T_0=t0,
+                                                                  T_mult=1, 
+                                                                  eta_min=args.lr_min)
+    warmup_scheduler = warmup.LinearWarmup(optimizer, warmup_period)
+
     criterion = nn.CrossEntropyLoss()
     scaler = torch.amp.GradScaler(enabled=args.use_amp)
-    best_model, best_val_acc = train_model(model=model,
+    best_model, best_val_acc, history = train_model(model=model,
+                                        scaler=scaler,
                                         criterion=criterion,
                                         optimizer=optimizer,
-                                        scaler=scaler,
-                                        lr_scheduler=None,
+                                        lr_scheduler=lr_scheduler,
+                                        warmup_scheduler=warmup_scheduler,
+                                        warmup_period=warmup_period,
                                         dataloaders=dataloaders,
                                         epochs=args.epochs,
                                         device=device,
                                         args=args)
+
+    import matplotlib.pyplot as plt
+    plt.plot(history["lr"])
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.title('Data Plot')
+    plt.savefig('lr.png')
 
     if args.wandb_log:
         wandb.finish()

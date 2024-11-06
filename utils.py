@@ -20,6 +20,11 @@ def seed_everything(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
+def set_threads(n_threads):
+    torch.set_num_threads(n_threads) 
+    torch.set_num_interop_threads(n_threads) 
+
+
 def get_label_encoder():
     save_path = DataPath.ViVQA_PATH / 'answer_space.txt'
     with open(save_path, 'r') as f:
