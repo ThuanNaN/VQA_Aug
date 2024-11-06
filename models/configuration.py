@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from torch import nn
 
 @dataclass
@@ -21,11 +21,13 @@ class VisionConfig:
 
 @dataclass
 class VQAConfig:
-    act_fn: nn.Module = nn.GELU()
+    activation_fn: nn.Module = nn.GELU()
     hidden_size: int = 512
     intermediate_size: int = 1024
     num_classes: int = 353
     use_dynamic_thresh: bool = False
     language_augment_thresh: float = 0.5
     vision_augment_thresh: float = 0.5
+    vision_config: VisionConfig = field(default_factory=VisionConfig)
+    language_config: LanguageConfig = field(default_factory=LanguageConfig)
 

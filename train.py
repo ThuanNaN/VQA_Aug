@@ -16,7 +16,7 @@ import torch
 from torch import nn
 from data_loader import ViVQADataset
 from torch.utils.data import DataLoader
-from models import VisionModel, LanguageModel, VQAModel
+from models import VQAModel, VQAProcessor
 
 logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(format="%(message)s", level=logging.INFO)
@@ -31,14 +31,14 @@ class BaseTrainingConfig:
     train_data_path: str = "./datasets/vivqa/20_filtered_question_paraphrases.csv"
     val_data_path: str = "./datasets/vivqa/test.csv"
     is_text_augment: bool = True
-    n_text_paras: int = 1
+    n_text_paras: int = 2
     is_img_augment: bool = True
-    n_img_augments: int = 1
+    n_img_augments: int = 2
     train_batch_size: int = 32
     val_batch_size: int = 32
     epochs: int = 30
-    lr: float = 1e-4
-    weight_decay: float = 1e-5
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
     use_amp: bool = True
     wandb_log: bool = False
     wandb_name: str = "ViVQA_Aug"
@@ -251,8 +251,8 @@ def main():
         wandb = None
 
     label2idx, idx2label, answer_space_len = get_label_encoder()
-    text_processor = LanguageModel.get_text_processor()
-    image_processor = VisionModel.get_img_processor()
+    text_processor = VQAProcessor().get_text_processor()
+    image_processor = VQAProcessor().get_img_processor()
 
     train_dataset = ViVQADataset(data_path=args.train_data_path,
                                  data_mode="train",
