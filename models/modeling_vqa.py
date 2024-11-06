@@ -34,8 +34,8 @@ class SelfAttentionBlock(nn.Module):
         self.scale = self.head_dim**-0.5
         self.dropout = nn.Dropout(dropout)
         self.qkv = nn.Linear(self.embed_dim, 3 * self.embed_dim, bias=False)
-
         self.projection = nn.Linear(self.embed_dim, self.embed_dim)
+        self.norm = nn.LayerNorm(self.embed_dim)
 
     def forward(self, feat_inputs: List[Tensor]) -> Tensor:
         bsz, num_feat, embed_dim = feat_inputs.size() 
@@ -54,8 +54,8 @@ class SelfAttentionBlock(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.embed_dim,)
         context_layer = context_layer.reshape(new_context_layer_shape)
 
-        output = self.projection(context_layer)
-        return output
+        output = self.projection(context_layer)[:, 0, :] # get the first sample
+        return self.norm(output)
 
 
 class LanguageModel(nn.Module):
@@ -72,6 +72,7 @@ class LanguageModel(nn.Module):
         )
         if self.config.is_augment:
             self.bottleneck = BottleneckBlock(self.config.hidden_size)
+            self.self_attention = SelfAttentionBlock(self.config.hidden_size, 16, 64, 0.1)
 
     def forward(self, inputs: list, augment_thresh: float) -> Tensor:
         r_thresh = torch.rand(1)
@@ -80,12 +81,13 @@ class LanguageModel(nn.Module):
                          for input_dict in inputs]
             para_features_t = torch.stack(embed_lst, dim=1)
 
-
-            x = torch.sum(para_features_t, dim=1)
-            x = self.bottleneck(x)
+            # x = torch.sum(para_features_t, dim=1)
+            # x = self.bottleneck(x)
+            x = self.self_attention(para_features_t)
         else:
             x = self.model(**inputs[0])
             x = x['last_hidden_state'][:, 0, :] # (batch, hidden_size)
+
         return self.projection(x)
 
 
@@ -105,6 +107,7 @@ class VisionModel(nn.Module):
         )
         if self.config.is_augment:
             self.bottleneck = BottleneckBlock(self.config.hidden_size)
+            self.self_attention = SelfAttentionBlock(self.config.hidden_size, 8, 96, 0.1)
 
     def forward(self, 
                 inputs: Tensor,
@@ -115,8 +118,10 @@ class VisionModel(nn.Module):
             img_features_t = [self.model(inputs[:, idx])["pooler_output"]
                               for idx in range(inputs.size(1))]
             img_features_t = torch.stack(img_features_t, dim=1)
-            x = torch.sum(img_features_t, dim=1)
-            x = self.bottleneck(x)
+
+            # x = torch.sum(img_features_t, dim=1)
+            # x = self.bottleneck(x)
+            x = self.self_attention(img_features_t)
         else:
             x = self.model(inputs[:, 0])["pooler_output"] # (batch, hidden_size)
 
@@ -156,6 +161,7 @@ class VQAModel(nn.Module):
         language_thresh, vision_thresh = self.get_threshold()
         language_output = self.language_model(text_inputs_lst, language_thresh) # (batch, 512)
         vision_output = self.vision_model(img_inputs_lst, vision_thresh) # (batch, 512)
+
         logits = self.mlp(language_output, vision_output)
         return logits
 

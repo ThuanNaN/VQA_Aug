@@ -22,9 +22,6 @@ logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 LOGGER = logging.getLogger("PyTorch-CLS")
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-
 @dataclass
 class BaseTrainingConfig:
     seed: int = 59
@@ -44,6 +41,7 @@ class BaseTrainingConfig:
     wandb_name: str = "ViVQA_Aug"
     run_name: str = "exp"
     save_ckpt: bool = True
+    device_ids: int = 0
 
 
 def train_model(
@@ -232,9 +230,16 @@ def main():
                         type=str,
                         default=base_config.run_name,
                         help='Weights and Biases run name')
+    parser.add_argument('--device_ids',
+                        type=int,
+                        default=base_config.device_ids,
+                        help='Number of device ids')
     args = parser.parse_args()
 
     seed_everything(args.seed)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device_ids)
+
+    device = "cuda" if torch.cuda.is_available() else 'cpu'
 
     try:
         device_name = os.getlogin()
