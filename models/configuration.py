@@ -8,7 +8,7 @@ class LanguageConfig:
     padding: str = 'max_length'
     truncation: bool = True
     return_token_type_ids: bool = False
-    frozen_backbone: bool = True
+    frozen_backbone: bool = False
     hidden_size: int = 1024
     self_attn_heads: int = 8
     self_attn_head_dim: int = 128
@@ -20,7 +20,7 @@ class LanguageConfig:
 @dataclass
 class VisionConfig:
     model_name = "facebook/deit-base-distilled-patch16-224"
-    frozen_backbone: bool = True
+    frozen_backbone: bool = False
     hidden_size: int = 768
     self_attn_heads: int = 8
     self_attn_head_dim: int = 96

@@ -1,6 +1,5 @@
 import argparse
 import yaml
-from yaml.loader import SafeLoader
 from dataclasses import dataclass
 from utils import (
     seed_everything, 
@@ -34,14 +33,15 @@ class BaseTrainingConfig:
     train_data_path: str = "./datasets/vivqa/20_filtered_question_paraphrases.csv"
     val_data_path: str = "./datasets/vivqa/test.csv"
     is_text_augment: bool = True
-    n_text_paras: int = 2
+    n_text_paras: int = 1
     is_img_augment: bool = True
-    n_img_augments: int = 2
+    n_img_augments: int = 1
     train_batch_size: int = 32
     val_batch_size: int = 32
     epochs: int = 30
+    lr: float = 1e-4
+    use_scheduler: bool = True
     warmup_steps: int = 500
-    lr: float = 1e-3
     lr_min: float = 1e-6
     weight_decay: float = 1e-4
     use_amp: bool = True
@@ -61,7 +61,6 @@ def train_model(
         optimizer,
         lr_scheduler,
         warmup_scheduler,
-        warmup_period,
         dataloaders,
         epochs,
         device,
@@ -93,6 +92,12 @@ def train_model(
                "val_loss": [], "val_acc": [], "lr": []}
     best_model_wts = copy.deepcopy(model.state_dict())
     best_val_acc = 0.0
+    
+    model = model.to(device)
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    LOGGER.info(f"\n{colorstr('Total Parameters:')} {total_params / 1e6}M")
+    LOGGER.info(f"\n{colorstr('Trainable Parameters:')} {trainable_params / 1e6}M")
 
     for epoch in range(epochs):
         LOGGER.info(colorstr(f'\nEpoch {epoch}/{epochs-1}:'))
@@ -138,7 +143,7 @@ def train_model(
                             
                             if lr_scheduler is not None:
                                 with warmup_scheduler.dampening():
-                                    if warmup_scheduler.last_step + 1 >= warmup_period:
+                                    if warmup_scheduler.last_step + 1 >= args.warmup_steps:
                                         lr_scheduler.step()
 
                 _, preds = torch.max(logits, 1)
@@ -194,94 +199,29 @@ def train_model(
 def main():
     base_config = BaseTrainingConfig()
     parser = argparse.ArgumentParser(description='ViVQA Training Script')
-    parser.add_argument('--seed',
-                        type=int,
-                        default=base_config.seed,
-                        help='Random seed')
-    parser.add_argument('--train_data_path',
-                        type=str,
-                        default=base_config.train_data_path,
-                        help='Path to training data')
-    parser.add_argument('--val_data_path',
-                        type=str,
-                        default=base_config.val_data_path,
-                        help='Path to validation data')
-    parser.add_argument('--is_text_augment',
-                        type=bool,
-                        default=base_config.is_text_augment,
-                        help='Text augmentation')
-    parser.add_argument('--n_text_paras',
-                        type=int,
-                        default=base_config.n_text_paras,
-                        help='Number of text paraphrases')
-    parser.add_argument('--is_img_augment',
-                        type=bool,
-                        default=base_config.is_img_augment,
-                        help='Image augmentation')
-    parser.add_argument('--n_img_augments',
-                        type=int,
-                        default=base_config.n_img_augments,
-                        help='Number of image augmentations')
-    parser.add_argument('--train_batch_size',
-                        type=int,
-                        default=base_config.train_batch_size,
-                        help='Training batch size')
-    parser.add_argument('--val_batch_size',
-                        type=int,
-                        default=base_config.val_batch_size,
-                        help='Validation batch size')
-    parser.add_argument('--epochs',
-                        type=int,
-                        default=base_config.epochs,
-                        help='Number of epochs')
-    parser.add_argument('--lr',
-                        type=float,
-                        default=base_config.lr,
-                        help='Learning rate')
-    parser.add_argument('--lr_min',
-                        type=float,
-                        default=base_config.lr_min,
-                        help='Minimum learning rate')
-    parser.add_argument('--weight_decay',
-                        type=float,
-                        default=base_config.weight_decay,
-                        help='Weight decay')
-    parser.add_argument('--use_amp',
-                        type=bool,
-                        default=base_config.use_amp,
-                        help='Automatic Mixed Precision (AMP)')
-    parser.add_argument('--wandb_log',
-                        type=bool,
-                        default=base_config.wandb_log,
-                        help='Log to Weights and Biases')
-    parser.add_argument('--save_ckpt',
-                        type=bool,
-                        default=base_config.save_ckpt,
-                        help='Save best checkpoint')
-    parser.add_argument('--wandb_name',
-                        type=str,
-                        default=base_config.wandb_name,
-                        help='Weights and Biases project name')
-    parser.add_argument('--log_result',
-                        type=bool,
-                        default=base_config.log_result,
-                        help='Log training results')
-    parser.add_argument('--run_name',   
-                        type=str,
-                        default=base_config.run_name,
-                        help='Weights and Biases run name')
-    parser.add_argument('--device_ids',
-                        type=int,
-                        default=base_config.device_ids,
-                        help='Number of device ids')
-    parser.add_argument('--warmup_steps',
-                        type=int,
-                        default=base_config.warmup_steps,
-                        help='Warmup steps')
-    parser.add_argument('--num_workers',
-                        type=int,
-                        default=base_config.num_workers,
-                        help='Number of workers')
+    parser.add_argument('--seed', type=int, default=base_config.seed, help='Random seed')
+    parser.add_argument('--train_data_path', type=str, default=base_config.train_data_path, help='Path to training data')
+    parser.add_argument('--val_data_path', type=str, default=base_config.val_data_path, help='Path to validation data')
+    parser.add_argument('--is_text_augment', type=bool, default=base_config.is_text_augment, help='Text augmentation')
+    parser.add_argument('--n_text_paras', type=int, default=base_config.n_text_paras, help='Number of text paraphrases')
+    parser.add_argument('--is_img_augment', type=bool, default=base_config.is_img_augment,  help='Image augmentation')
+    parser.add_argument('--n_img_augments', type=int, default=base_config.n_img_augments,  help='Number of image augmentations')
+    parser.add_argument('--train_batch_size', type=int, default=base_config.train_batch_size, help='Training batch size')
+    parser.add_argument('--val_batch_size', type=int, default=base_config.val_batch_size, help='Validation batch size')
+    parser.add_argument('--epochs', type=int, default=base_config.epochs, help='Number of epochs')
+    parser.add_argument('--lr', type=float, default=base_config.lr, help='Learning rate')
+    parser.add_argument('--use_scheduler', type=bool, default=base_config.use_scheduler, help='Use learning rate scheduler')
+    parser.add_argument('--lr_min', type=float, default=base_config.lr_min, help='Minimum learning rate')
+    parser.add_argument('--weight_decay', type=float, default=base_config.weight_decay, help='Weight decay')
+    parser.add_argument('--use_amp', type=bool, default=base_config.use_amp, help='Automatic Mixed Precision (AMP)')
+    parser.add_argument('--wandb_log', type=bool, default=base_config.wandb_log, help='Log to Weights and Biases')
+    parser.add_argument('--save_ckpt', type=bool, default=base_config.save_ckpt, help='Save best checkpoint')
+    parser.add_argument('--wandb_name', type=str, default=base_config.wandb_name, help='Weights and Biases project name')
+    parser.add_argument('--log_result', type=bool, default=base_config.log_result, help='Log training results')
+    parser.add_argument('--run_name', type=str, default=base_config.run_name, help='Weights and Biases run name')
+    parser.add_argument('--device_ids', type=int, default=base_config.device_ids, help='Number of device ids')
+    parser.add_argument('--warmup_steps', type=int, default=base_config.warmup_steps, help='Warmup steps')
+    parser.add_argument('--num_workers', type=int, default=base_config.num_workers, help='Number of workers')
     args = parser.parse_args()
 
     seed_everything(args.seed)
@@ -341,27 +281,22 @@ def main():
         "val": test_loader
     }
 
-    model = VQAModel().to(device)
+    model = VQAModel()
     model.config.num_classes = answer_space_len
 
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    LOGGER.info(f"Total Parameters: {total_params // 1e6}M")
-    LOGGER.info(f"Trainable Parameters: {trainable_params // 1e6}M")
-
-
-    steps_per_epoch = len(train_loader)
-    total_steps = steps_per_epoch * args.epochs
-    warmup_period = args.warmup_steps
-    num_steps = total_steps - warmup_period
+    total_steps = len(train_loader) * args.epochs
+    num_steps = total_steps - args.warmup_steps
 
     optimizer = optim.Adam(model.parameters(),
                      lr=args.lr,
                      weight_decay=args.weight_decay)
-    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                        T_max=num_steps,
-                                                        eta_min=args.lr_min)
-    warmup_scheduler = warmup.LinearWarmup(optimizer, warmup_period)
+    
+    lr_scheduler, warmup_scheduler = None, None
+    if args.use_scheduler:
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                            T_max=num_steps,
+                                                            eta_min=args.lr_min)
+        warmup_scheduler = warmup.LinearWarmup(optimizer, args.warmup_steps)
 
     criterion = nn.CrossEntropyLoss()
     scaler = torch.amp.GradScaler(enabled=args.use_amp)
@@ -371,7 +306,6 @@ def main():
                                         optimizer=optimizer,
                                         lr_scheduler=lr_scheduler,
                                         warmup_scheduler=warmup_scheduler,
-                                        warmup_period=warmup_period,
                                         dataloaders=dataloaders,
                                         epochs=args.epochs,
                                         device=device,
