@@ -2,9 +2,15 @@ from pathlib import Path
 import os
 import copy
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import pickle
+
+
 class DataPath:
     DATASET_DIR = Path('datasets')
     ViVQA_PATH = DATASET_DIR / 'vivqa'
+    RUN_TRAIN_DIR = Path('runs')
 
 def seed_everything(seed: int):
     import random, os
@@ -38,19 +44,80 @@ def get_label_encoder():
 
 
 def save_model_ckpt(model, path_dir, ckpt_name='best.pt'):
-    path_save = os.path.join(path_dir, "weights")
+    path_save = path_dir / "weights"
     os.makedirs(path_save, exist_ok=True)
     model_ckpt = copy.deepcopy(model.state_dict())
     models_ckpt = {
         "model_state_dict": model_ckpt,
     }
-    torch.save(models_ckpt,os.path.join(path_save, ckpt_name))
+    torch.save(models_ckpt, path_save / ckpt_name)
 
 
 def load_model_ckpt(ckpt_path, model, device):
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     return model
+
+
+def plot_and_log_result(path_save, history):
+    hist = os.path.join(path_save, "history.pkl")
+    with open(hist, 'wb') as f:
+        pickle.dump(history, f)
+
+    train_loss_hist = np.array(history["train_loss"])
+    train_acc_hist = np.array(history["train_acc"])
+    val_loss_hist = np.array(history["val_loss"])
+    val_acc_hist = np.array(history["val_acc"])
+    lr_hist = np.array(history["lr"])
+    epochs = np.arange(len(train_loss_hist))
+
+    train_result = os.path.join(path_save, "train_result.txt")
+    with open(train_result, "w") as f:
+        f.write("Epoch\tLoss\tAccuracy\n")
+        for epoch, loss, acc in zip(epochs, np.round(train_loss_hist, 6), np.round(train_acc_hist, 6)):
+            f.write(f"{epoch}\t{loss}\t{acc}\n")
+    
+    val_result = os.path.join(path_save, "val_result.txt")
+    with open(val_result, "w") as f:
+        f.write("Epoch\tLoss\tAccuracy\n")
+        for epoch, loss, acc in zip(epochs, np.round(val_loss_hist), np.round(val_acc_hist, 6)):
+            f.write(f"{epoch}\t{loss}\t{acc}\n")
+
+    epochs = np.arange(0, train_loss_hist.shape[0], 1, dtype=int)
+
+    fig, axs = plt.subplots(2, 2)
+    fig.suptitle('Training result')
+
+    axs[0, 0].plot(epochs, train_loss_hist)
+    axs[0, 0].set_title("train loss")
+    axs[0, 0].set_ylabel("loss")
+
+    axs[0, 1].plot(epochs, train_acc_hist)
+    axs[0, 1].set_title("train acc")
+    axs[0, 1].set_ylabel("acc")
+
+    axs[1, 0].plot(epochs, val_loss_hist)
+    axs[1, 0].set_title("val loss")
+    axs[1, 0].set_ylabel("loss")
+
+    axs[1, 1].plot(epochs, val_acc_hist)
+    axs[1, 1].set_title("val acc")
+    axs[1, 1].set_ylabel("acc")
+
+    for ax in fig.get_axes():
+        ax.set_xlabel("Epochs")
+        # ax.set_xticks(epochs)
+
+    fig.tight_layout()
+    fig.savefig(f"{path_save}/result.png")
+    plt.close(fig) 
+
+    steps = np.arange(lr_hist.shape[0])
+    fig_lr, ax_lr = plt.subplots(nrows=1, ncols=1)
+    ax_lr.plot(steps, lr_hist)
+    ax_lr.set_title('Training learning rate')
+    fig_lr.savefig(f"{path_save}/result_lr.png")
+    plt.close(fig_lr) 
 
 
 def colorstr(*input):

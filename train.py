@@ -1,11 +1,15 @@
 import argparse
+import yaml
+from yaml.loader import SafeLoader
 from dataclasses import dataclass
 from utils import (
     seed_everything, 
     get_label_encoder, 
     colorstr, 
     save_model_ckpt,
-    set_threads
+    plot_and_log_result,
+    set_threads,
+    DataPath
 )
 from tqdm import tqdm
 import time
@@ -44,6 +48,7 @@ class BaseTrainingConfig:
     use_amp: bool = True
     wandb_log: bool = False
     wandb_name: str = "ViVQA_Aug"
+    log_result: bool = True
     run_name: str = "exp"
     save_ckpt: bool = True
     device_ids: int = 0
@@ -65,9 +70,16 @@ def train_model(
         args=None,
 ):
     since = time.perf_counter()
+
+    if args.log_result:
+        DIR_SAVE = DataPath.RUN_TRAIN_DIR/f"{args.run_name}/run_seed_{args.seed}"
+        os.makedirs(DIR_SAVE)
+        save_opt = os.path.join(DIR_SAVE, "opt.yaml")
+        with open(save_opt, 'w') as f:
+            yaml.dump(args.__dict__, f, sort_keys=False)
+
     LOGGER.info(f"\n{colorstr('Device:')} {device}")
     LOGGER.info(f"\n{colorstr('Optimizer:')} {optimizer}")
-
     if lr_scheduler:
         LOGGER.info(
             f"\n{colorstr('LR Scheduler:')} {type(lr_scheduler).__name__}")
@@ -161,15 +173,23 @@ def train_model(
                     best_val_acc = epoch_acc
                     best_model_wts = copy.deepcopy(model.state_dict())
                     if args.save_ckpt:
-                        # save_model_ckpt(model, DIR_SAVE, "best.pt")
-                        pass
+                        save_model_ckpt(model, DIR_SAVE, "best.pt")
 
+    if args.save_ckpt:
+        save_model_ckpt(model, DIR_SAVE, "last.pt")
+    if args.save_ckpt:
+        LOGGER.info(f"Best model weight saved at {DIR_SAVE}/weights/best.pt")
+        LOGGER.info(f"Last model weight saved at {DIR_SAVE}/weights/last.pt")
+
+    if args.log_result:
+        plot_and_log_result(DIR_SAVE, history)
+    
     time_elapsed = time.perf_counter() - since
     LOGGER.info(f"Training complete in {time_elapsed // 3600}h {time_elapsed % 3600 // 60}m {time_elapsed % 60//1}s with {epochs} epochs")
-    LOGGER.info(f"Best val Acc: {round(best_val_acc.items(), 6)}")
+    LOGGER.info(f"Best val Acc: {round(best_val_acc.item(), 6)}")
 
     model.load_state_dict(best_model_wts)
-    return model, best_val_acc.items(), history
+    return model, best_val_acc.item(), history
 
 
 def main():
@@ -247,6 +267,10 @@ def main():
                         type=str,
                         default=base_config.wandb_name,
                         help='Weights and Biases project name')
+    parser.add_argument('--log_result',
+                        type=bool,
+                        default=base_config.log_result,
+                        help='Log training results')
     parser.add_argument('--run_name',   
                         type=str,
                         default=base_config.run_name,
@@ -297,15 +321,13 @@ def main():
                                  is_text_augment=args.is_text_augment,
                                  n_text_paras=args.n_text_paras,
                                  is_img_augment=args.is_img_augment,
-                                 n_img_augments=args.n_img_augments,
-                                 )
+                                 n_img_augments=args.n_img_augments)
 
     test_dataset = ViVQADataset(data_path=args.val_data_path,
                                 data_mode="val",
                                 text_processor=text_processor,
                                 image_processor=image_processor,
-                                label_encoder=label2idx,
-                                )
+                                label_encoder=label2idx)
 
     train_loader = DataLoader(train_dataset,
                               batch_size=args.train_batch_size,
@@ -361,13 +383,6 @@ def main():
                                         epochs=args.epochs,
                                         device=device,
                                         args=args)
-
-    import matplotlib.pyplot as plt
-    plt.plot(history["lr"])
-    plt.xlabel('Index')
-    plt.ylabel('Value')
-    plt.title('Data Plot')
-    plt.savefig('lr.png')
 
     if args.wandb_log:
         wandb.finish()
