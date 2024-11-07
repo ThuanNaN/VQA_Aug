@@ -41,9 +41,8 @@ class BaseTrainingConfig:
     val_batch_size: int = 32
     epochs: int = 30
     warmup_steps: int = 500
-    lr: float = 1e-4
+    lr: float = 1e-3
     lr_min: float = 1e-6
-    scheluder_interval: int = 3
     weight_decay: float = 1e-4
     use_amp: bool = True
     wandb_log: bool = False
@@ -73,7 +72,8 @@ def train_model(
 
     if args.log_result:
         DIR_SAVE = DataPath.RUN_TRAIN_DIR/f"{args.run_name}/run_seed_{args.seed}"
-        os.makedirs(DIR_SAVE)
+        if not DIR_SAVE.exists():
+            DIR_SAVE.mkdir(parents=True, exist_ok=True)
         save_opt = os.path.join(DIR_SAVE, "opt.yaml")
         with open(save_opt, 'w') as f:
             yaml.dump(args.__dict__, f, sort_keys=False)
@@ -133,14 +133,13 @@ def train_model(
                             scaler.step(optimizer)
                             scaler.update()
                             
+                            batch_lr = optimizer.param_groups[0]["lr"]
+                            history['lr'].append(batch_lr)
+                            
                             if lr_scheduler is not None:
-                                batch_lr = lr_scheduler.optimizer.param_groups[0]["lr"]
                                 with warmup_scheduler.dampening():
                                     if warmup_scheduler.last_step + 1 >= warmup_period:
                                         lr_scheduler.step()
-                            else:
-                                batch_lr = args.lr
-                            history['lr'].append(batch_lr)
 
                 _, preds = torch.max(logits, 1)
                 running_items += labels.size(0)
@@ -243,10 +242,6 @@ def main():
                         type=float,
                         default=base_config.lr_min,
                         help='Minimum learning rate')
-    parser.add_argument('--scheluder_interval',
-                        type=int,
-                        default=base_config.scheluder_interval,
-                        help='Scheduler interval')
     parser.add_argument('--weight_decay',
                         type=float,
                         default=base_config.weight_decay,
@@ -359,15 +354,13 @@ def main():
     total_steps = steps_per_epoch * args.epochs
     warmup_period = args.warmup_steps
     num_steps = total_steps - warmup_period
-    t0 = num_steps // args.scheluder_interval
 
     optimizer = optim.Adam(model.parameters(),
                      lr=args.lr,
                      weight_decay=args.weight_decay)
-    lr_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,
-                                                                  T_0=t0,
-                                                                  T_mult=1, 
-                                                                  eta_min=args.lr_min)
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                        T_max=num_steps,
+                                                        eta_min=args.lr_min)
     warmup_scheduler = warmup.LinearWarmup(optimizer, warmup_period)
 
     criterion = nn.CrossEntropyLoss()
