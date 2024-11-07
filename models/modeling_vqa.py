@@ -117,7 +117,7 @@ class LanguageModel(nn.Module):
                                                   self.config.cross_attn_heads, 
                                                   self.config.hidden_size, 
                                                   self.config.attn_dropout)
-            self.mlp = MLP(self.config.hidden_size)
+            self.mlp = MLP(self.config.hidden_size, self.config.attn_dropout)
             self.norm = nn.LayerNorm(self.config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, inputs: list, augment_thresh: float) -> Tensor:
@@ -154,7 +154,7 @@ class VisionModel(nn.Module):
                                                   self.config.cross_attn_heads, 
                                                   self.config.hidden_size, 
                                                   self.config.attn_dropout)
-            self.mlp = MLP(self.config.hidden_size)    
+            self.mlp = MLP(self.config.hidden_size, self.config.attn_dropout)    
             self.norm = nn.LayerNorm(self.config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, 
