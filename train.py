@@ -36,9 +36,9 @@ class BaseTrainingConfig:
     train_batch_size: int = 32
     val_batch_size: int = 32
     epochs: int = 30
-    warmup_steps: int = 1000
-    lr: float = 1e-3
-    lr_min: float = 1e-5
+    warmup_steps: int = 500
+    lr: float = 1e-4
+    lr_min: float = 1e-6
     scheluder_interval: int = 3
     weight_decay: float = 1e-4
     use_amp: bool = True
@@ -120,12 +120,15 @@ def train_model(
                             scaler.scale(loss).backward()
                             scaler.step(optimizer)
                             scaler.update()
-                            history['lr'].append(lr_scheduler.optimizer.param_groups[0]
-                                ["lr"]) if lr_scheduler else history['lr'].append(args.lr)
+                            
                             if lr_scheduler is not None:
+                                batch_lr = lr_scheduler.optimizer.param_groups[0]["lr"]
                                 with warmup_scheduler.dampening():
                                     if warmup_scheduler.last_step + 1 >= warmup_period:
                                         lr_scheduler.step()
+                            else:
+                                batch_lr = args.lr
+                            history['lr'].append(batch_lr)
 
                 _, preds = torch.max(logits, 1)
                 running_items += labels.size(0)
@@ -135,16 +138,16 @@ def train_model(
                 epoch_acc = running_corrects / running_items
 
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}GB'
-                desc = ('%35s' + '%15.6g' * 2) % (mem, running_loss /
-                                                  running_items, running_corrects / running_items)
+                desc = ('%35s' + '%15.6g' * 2) % (mem, running_loss/running_items, running_corrects/running_items)
                 _phase.set_description_str(desc)
+                _phase.set_postfix_str(f"step: {warmup_scheduler.last_step}, lr: {batch_lr}")
 
             if phase == 'train':
                 if args.wandb_log:
                     wandb.log({"train_acc": epoch_acc, "train_loss": epoch_loss}, step = epoch)
                     if lr_scheduler:
                         wandb.log(
-                            {"lr": lr_scheduler.optimizer.param_groups[0]["lr"]}, step = epoch)
+                            {"lr": batch_lr}, step = epoch)
                     else:
                         wandb.log({"lr": args.lr})
                 history["train_loss"].append(epoch_loss)
@@ -163,10 +166,10 @@ def train_model(
 
     time_elapsed = time.perf_counter() - since
     LOGGER.info(f"Training complete in {time_elapsed // 3600}h {time_elapsed % 3600 // 60}m {time_elapsed % 60//1}s with {epochs} epochs")
-    LOGGER.info(f"Best val Acc: {round(best_val_acc, 6)}")
+    LOGGER.info(f"Best val Acc: {round(best_val_acc.items(), 6)}")
 
     model.load_state_dict(best_model_wts)
-    return model, best_val_acc, history
+    return model, best_val_acc.items(), history
 
 
 def main():

@@ -17,10 +17,10 @@ class SelfAttention(nn.Module):
                 f" {self.num_heads})."
             )
         self.scale = self.head_dim**-0.5
-        self.dropout = nn.Dropout(dropout)
         self.qkv = nn.Linear(self.embed_dim, 3 * self.embed_dim, bias=False)
         self.projection = nn.Linear(self.embed_dim, self.embed_dim)
-        self.norm = nn.LayerNorm(self.embed_dim)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
 
     def forward(self, feat_inputs: Tensor) -> Tensor:
         bsz, num_feat, embed_dim = feat_inputs.size() 
@@ -33,14 +33,13 @@ class SelfAttention(nn.Module):
         attention_scores = attention_scores * self.scale
 
         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-        attention_probs = self.dropout(attention_probs)
+        attention_probs = self.attn_dropout(attention_probs)
         
         context_layer = torch.matmul(attention_probs, value_states).permute(0, 2, 1, 3)
         new_context_layer_shape = context_layer.size()[:-2] + (self.embed_dim,)
         context_layer = context_layer.reshape(new_context_layer_shape)
 
-        output = self.projection(context_layer)
-        return output
+        return self.resid_dropout(self.projection(context_layer))
 
 
 class CrossAttention(nn.Module):
@@ -52,7 +51,9 @@ class CrossAttention(nn.Module):
         self.query = nn.Linear(hidden_size, self.all_head_size)
         self.key = nn.Linear(encoder_hidden_size, self.all_head_size)
         self.value = nn.Linear(encoder_hidden_size, self.all_head_size)
-        self.dropout = nn.Dropout(dropout)
+        self.projection = nn.Linear(hidden_size, hidden_size)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -72,15 +73,31 @@ class CrossAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-        attention_probs_dropped = self.dropout(attention_probs)
+        attention_probs_dropped = self.attn_dropout(attention_probs)
 
         context_layer = torch.matmul(attention_probs_dropped, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
 
         output = context_layer.view(*new_context_layer_shape)
-        return output
+        return self.resid_dropout(self.projection(output))
+    
 
+
+class MLP(nn.Module):
+    def __init__(self, hidden_size, dropout) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(hidden_size, hidden_size*4)
+        self.fc2 = nn.Linear(hidden_size*4, hidden_size)
+        self.activation_fn = nn.GELU()
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.fc1(x)
+        x = self.activation_fn(x)
+        x = self.fc2(x)
+        x = self.dropout(x)
+        return x
 
 class LanguageModel(nn.Module):
     def __init__(self, config: LanguageConfig):
@@ -100,6 +117,7 @@ class LanguageModel(nn.Module):
                                                   self.config.cross_attn_heads, 
                                                   self.config.hidden_size, 
                                                   self.config.attn_dropout)
+            self.mlp = MLP(self.config.hidden_size)
             self.norm = nn.LayerNorm(self.config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, inputs: list, augment_thresh: float) -> Tensor:
@@ -109,9 +127,10 @@ class LanguageModel(nn.Module):
         if self.training and self.config.is_augment and r_thresh < augment_thresh:
             for input_dict in inputs[1:]:
                 encoder_hidden_state = self.model(**input_dict)['last_hidden_state']
-                hidden_state = self.norm(hidden_state) + self.cross_attention(hidden_state, 
-                                                                              encoder_hidden_state)
-                hidden_state = self.norm(hidden_state) + self.self_attention(hidden_state)
+                hidden_state = self.norm(hidden_state + self.cross_attention(hidden_state, encoder_hidden_state))
+                hidden_state = self.norm(hidden_state + self.mlp(hidden_state))
+                hidden_state = self.norm(hidden_state + self.self_attention(hidden_state))
+                hidden_state = self.norm(hidden_state + self.mlp(hidden_state))
 
         return hidden_state
 
@@ -135,6 +154,7 @@ class VisionModel(nn.Module):
                                                   self.config.cross_attn_heads, 
                                                   self.config.hidden_size, 
                                                   self.config.attn_dropout)
+            self.mlp = MLP(self.config.hidden_size)    
             self.norm = nn.LayerNorm(self.config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, 
@@ -148,9 +168,10 @@ class VisionModel(nn.Module):
             num_sample = inputs.size(1)
             for idx in range(num_sample):
                 encoder_hidden_state = self.model(inputs[:, idx])['last_hidden_state']
-                hidden_state = self.norm(hidden_state) + self.cross_attention(hidden_state,
-                                                                              encoder_hidden_state)
-                hidden_state = self.norm(hidden_state) + self.self_attention(hidden_state)
+                hidden_state =self.norm(hidden_state + self.cross_attention(hidden_state, encoder_hidden_state))
+                hidden_state = self.norm(hidden_state + self.mlp(hidden_state))
+                hidden_state = self.norm(hidden_state + self.self_attention(hidden_state))
+                hidden_state = self.norm(hidden_state + self.mlp(hidden_state))
 
         return hidden_state
     
