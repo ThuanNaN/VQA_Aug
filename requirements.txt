@@ -1,0 +1,9 @@
+torch
+transformers[torch]
+peft
+bitsandbytes
+pytorch-warmup
+wandb
+matplotlib
+pandas
+pillow

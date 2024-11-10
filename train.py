@@ -33,18 +33,18 @@ class BaseTrainingConfig:
     train_data_path: str = "./datasets/vivqa/20_filtered_question_paraphrases.csv"
     val_data_path: str = "./datasets/vivqa/test.csv"
     is_text_augment: bool = True
-    n_text_paras: int = 1
+    n_text_paras: int = 2
     is_img_augment: bool = True
-    n_img_augments: int = 1
-    train_batch_size: int = 32
-    val_batch_size: int = 32
+    n_img_augments: int = 2
+    train_batch_size: int = 64
+    val_batch_size: int = 64
     epochs: int = 30
     lr: float = 1e-4
     use_scheduler: bool = True
     warmup_steps: int = 500
     lr_min: float = 1e-6
     weight_decay: float = 1e-4
-    use_amp: bool = True
+    use_amp: bool = False
     wandb_log: bool = False
     wandb_name: str = "ViVQA_Aug"
     log_result: bool = True
@@ -204,8 +204,8 @@ def main():
     parser.add_argument('--val_data_path', type=str, default=base_config.val_data_path, help='Path to validation data')
     parser.add_argument('--is_text_augment', type=bool, default=base_config.is_text_augment, help='Text augmentation')
     parser.add_argument('--n_text_paras', type=int, default=base_config.n_text_paras, help='Number of text paraphrases')
-    parser.add_argument('--is_img_augment', type=bool, default=base_config.is_img_augment,  help='Image augmentation')
-    parser.add_argument('--n_img_augments', type=int, default=base_config.n_img_augments,  help='Number of image augmentations')
+    parser.add_argument('--is_img_augment', type=bool, default=base_config.is_img_augment, help='Image augmentation')
+    parser.add_argument('--n_img_augments', type=int, default=base_config.n_img_augments, help='Number of image augmentations')
     parser.add_argument('--train_batch_size', type=int, default=base_config.train_batch_size, help='Training batch size')
     parser.add_argument('--val_batch_size', type=int, default=base_config.val_batch_size, help='Validation batch size')
     parser.add_argument('--epochs', type=int, default=base_config.epochs, help='Number of epochs')
