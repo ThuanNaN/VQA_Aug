@@ -50,7 +50,6 @@ class BaseTrainingConfig:
     log_result: bool = True
     run_name: str = "exp"
     save_ckpt: bool = True
-    device_ids: int = 0
     num_workers: int = 4
 
 
@@ -219,14 +218,12 @@ def main():
     parser.add_argument('--wandb_name', type=str, default=base_config.wandb_name, help='Weights and Biases project name')
     parser.add_argument('--log_result', type=bool, default=base_config.log_result, help='Log training results')
     parser.add_argument('--run_name', type=str, default=base_config.run_name, help='Weights and Biases run name')
-    parser.add_argument('--device_ids', type=int, default=base_config.device_ids, help='Number of device ids')
     parser.add_argument('--warmup_steps', type=int, default=base_config.warmup_steps, help='Warmup steps')
     parser.add_argument('--num_workers', type=int, default=base_config.num_workers, help='Number of workers')
     args = parser.parse_args()
 
     seed_everything(args.seed)
     set_threads(args.num_workers)
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device_ids)
 
     device = "cuda" if torch.cuda.is_available() else 'cpu'
 
