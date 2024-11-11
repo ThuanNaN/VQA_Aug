@@ -92,13 +92,11 @@ class MLP(nn.Module):
         self.fc1 = nn.Linear(config.hidden_size, config.hidden_size*4)
         self.fc2 = nn.Linear(config.hidden_size*4, config.hidden_size)
         self.activation_fn = nn.GELU()
-        self.dropout = nn.Dropout(config.mlp_dropout)
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.fc1(x)
         x = self.activation_fn(x)
         x = self.fc2(x)
-        x = self.dropout(x)
         return x
 
 

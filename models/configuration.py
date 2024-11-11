@@ -22,7 +22,6 @@ class LanguageConfig:
     self_attn_head_dim: int = 128
     cross_attn_heads: int = 8
     attn_dropout: float = 0.1
-    mlp_dropout: float = 0.1
     layer_norm_eps: float = 1e-6
     lora_rank: int = 64
     lora_alpha: int = 16
@@ -36,7 +35,6 @@ class VisionConfig:
     self_attn_head_dim: int = 96
     cross_attn_heads: int = 8
     attn_dropout: float = 0.1
-    mlp_dropout: float = 0.1
     layer_norm_eps: float = 1e-6
     lora_rank: int = 64
     lora_alpha: int = 16
