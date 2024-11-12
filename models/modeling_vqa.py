@@ -4,44 +4,7 @@ import torch
 from torch import nn, Tensor
 from transformers import AutoModel
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from .configuration import LanguageConfig, VisionConfig, VQAConfig, double_quant_config
-
-
-# class SelfAttention(nn.Module):
-#     def __init__(self, embed_dim, num_heads, head_dim, dropout) -> None:
-#         super().__init__()
-#         self.embed_dim = embed_dim
-#         self.num_heads = num_heads
-#         self.head_dim = head_dim
-#         if self.head_dim * self.num_heads != self.embed_dim:
-#             raise ValueError(
-#                 f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
-#                 f" {self.num_heads})."
-#             )
-#         self.scale = self.head_dim**-0.5
-#         self.qkv = nn.Linear(self.embed_dim, 3 * self.embed_dim, bias=False)
-#         self.projection = nn.Linear(self.embed_dim, self.embed_dim)
-#         self.attn_dropout = nn.Dropout(dropout)
-#         self.resid_dropout = nn.Dropout(dropout)
-
-#     def forward(self, inputs: Tensor) -> Tensor:
-#         bsz, num_feat, embed_dim = inputs.size()
-#         mixed_qkv = self.qkv(inputs)
-#         mixed_qkv = mixed_qkv.reshape(bsz, num_feat, 3, self.num_heads, embed_dim // self.num_heads
-#                                       ).permute(2, 0, 3, 1, 4)
-#         query_states, key_states, value_states = mixed_qkv[0], mixed_qkv[1], mixed_qkv[2]
-
-#         attention_scores = torch.matmul(query_states, key_states.transpose(-1, -2))
-#         attention_scores = attention_scores * self.scale
-
-#         attention_probs = nn.functional.softmax(attention_scores, dim=-1)
-#         attention_probs = self.attn_dropout(attention_probs)
-
-#         context_layer = torch.matmul(attention_probs, value_states).permute(0, 2, 1, 3)
-#         new_context_layer_shape = context_layer.size()[:-2] + (self.embed_dim,)
-#         context_layer = context_layer.reshape(new_context_layer_shape)
-
-#         return self.resid_dropout(self.projection(context_layer))
+from .configuration import VQAConfig, double_quant_config
 
 
 class CrossAttention(nn.Module):
@@ -87,11 +50,12 @@ class CrossAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, config: LanguageConfig | VisionConfig) -> None:
+    def __init__(self, input_dim, projection_scale, activation_fn) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(config.hidden_size, config.hidden_size*4)
-        self.fc2 = nn.Linear(config.hidden_size*4, config.hidden_size)
-        self.activation_fn = nn.GELU()
+        intermediate_dim = int(input_dim * projection_scale)
+        self.fc1 = nn.Linear(input_dim, intermediate_dim)
+        self.fc2 = nn.Linear(intermediate_dim, input_dim)
+        self.activation_fn = activation_fn
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.fc1(x)
@@ -101,10 +65,9 @@ class MLP(nn.Module):
 
 
 class LanguageModel(nn.Module):
-    def __init__(self, config: LanguageConfig):
+    def __init__(self, config: VQAConfig):
         super().__init__()
-        self.config = config
-        base_model = AutoModel.from_pretrained(config.model_name,
+        base_model = AutoModel.from_pretrained(config.lang_model_name,
                                                quantization_config=double_quant_config,
                                                low_cpu_mem_usage=True)
         base_model.config.use_cache = False
@@ -124,10 +87,10 @@ class LanguageModel(nn.Module):
 
 
 class VisionModel(nn.Module):
-    def __init__(self, config: VisionConfig):
+    def __init__(self, config: VQAConfig):
         super().__init__()
         self.config = config
-        base_model = AutoModel.from_pretrained(config.model_name,
+        base_model = AutoModel.from_pretrained(config.vis_model_name,
                                                attn_implementation="sdpa",
                                                quantization_config=double_quant_config,
                                                low_cpu_mem_usage=True)
@@ -149,11 +112,28 @@ class VisionModel(nn.Module):
 
 
 class CrossAugmentation(nn.Module):
-    def __init__(self, attn_layer, mlp_layer, norm_layer):
+    def __init__(self, 
+                 encoder_hidden_size, 
+                 num_heads, 
+                 hidden_size, 
+                 projection_scale, 
+                 activation_fn, 
+                 dropout, 
+                 layer_norm_eps
+                 ) -> None:
         super().__init__()
-        self.attn = attn_layer
-        self.mlp = mlp_layer
-        self.norm = norm_layer
+        self.attn = CrossAttention(
+            encoder_hidden_size=encoder_hidden_size,
+            num_heads=num_heads,
+            hidden_size=hidden_size,
+            dropout=dropout
+        )
+        self.mlp = MLP(
+            input_dim=hidden_size,
+            projection_scale=projection_scale,
+            activation_fn=activation_fn
+        )
+        self.norm = nn.LayerNorm(hidden_size, eps=layer_norm_eps)
 
     def forward(self, query: Tensor, encode_hidden_states: List[Tensor]) -> Tensor:
         for encode_hidden_state in encode_hidden_states:
@@ -163,12 +143,11 @@ class CrossAugmentation(nn.Module):
 
 
 class Classifier(nn.Module):
-    def __init__(self, config: VQAConfig):
+    def __init__(self, input_dim, intermediate_dim, activation_fn):
         super().__init__()
-        self.config = config
-        self.activation_fn = config.activation_fn
-        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.fc2 = nn.Linear(config.intermediate_size, config.num_classes)
+        self.fc1 = nn.Linear(input_dim, intermediate_dim)
+        self.fc2 = nn.Linear(intermediate_dim, input_dim)
+        self.activation_fn = activation_fn
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.fc1(x)
@@ -180,50 +159,64 @@ class VQAModel(nn.Module):
     def __init__(self, config: VQAConfig = VQAConfig()):
         super().__init__()
         self.config = config
-        self.vision_config = config.vision_config
-        self.language_config = config.language_config
-        self.vision_model = VisionModel(self.vision_config)
-        self.language_model = LanguageModel(self.language_config)
+        self.vision_model = VisionModel(config)
+        self.language_model = LanguageModel(config)
 
-        self.language_query_attn = CrossAttention(encoder_hidden_size=self.vision_config.hidden_size,
-                                                  num_heads=self.config.query_attn_heads,
-                                                  hidden_size=self.language_config.hidden_size,
-                                                  dropout=self.config.attn_dropout)
-
-        self.vision_query_attn = CrossAttention(encoder_hidden_size=self.language_config.hidden_size,
-                                                num_heads=self.config.query_attn_heads,
-                                                hidden_size=self.vision_config.hidden_size,
-                                                dropout=self.config.attn_dropout)
-
-        self.lang_cross_augment = CrossAugmentation(
-            attn_layer=self.language_query_attn,
-            mlp_layer=MLP(self.language_config),
-            norm_layer=nn.LayerNorm(self.language_config.hidden_size, eps=config.layer_norm_eps)
+        self.lang_cross_augment = nn.ModuleList(
+            CrossAugmentation(
+                encoder_hidden_size=config.vis_hidden_size, 
+                num_heads=config.cross_augment_heads, 
+                hidden_size=config.lang_hidden_size, 
+                projection_scale=config.projection_scale, 
+                activation_fn=config.activation_fn, 
+                dropout=config.attn_dropout, 
+                layer_norm_eps=config.layer_norm_eps
+            ) for _ in range(config.cross_augment_layer)
         )
 
-        self.vision_cross_augment = CrossAugmentation(
-            attn_layer=self.vision_query_attn,
-            mlp_layer=MLP(self.vision_config),
-            norm_layer=nn.LayerNorm(self.vision_config.hidden_size, eps=config.layer_norm_eps)
+        self.vision_cross_augment = nn.ModuleList(
+            CrossAugmentation(
+                encoder_hidden_size=config.lang_hidden_size,
+                num_heads=config.cross_augment_heads,
+                hidden_size=config.vis_hidden_size,
+                projection_scale=config.projection_scale,
+                activation_fn=config.activation_fn,
+                dropout=config.attn_dropout,
+                layer_norm_eps=config.layer_norm_eps
+            ) for _ in range(config.cross_augment_layer)
         )
 
-        self.post_layernorm = nn.LayerNorm(self.language_config.hidden_size, eps=config.layer_norm_eps)
-        self.classifier = Classifier(self.config)
+        self.query_attn = nn.ModuleList(
+            CrossAttention(
+                encoder_hidden_size=config.vis_hidden_size, 
+                num_heads=config.query_attn_heads, 
+                hidden_size=config.lang_hidden_size, 
+                dropout=config.attn_dropout
+            )
+            for _ in range(config.query_layer)
+        )
+
+        self.post_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.classifier = Classifier(config.hidden_size, config.intermediate_size, config.activation_fn)
 
     def forward(self,
                 text_inputs_lst: List[Dict[str, Tensor]],
                 img_inputs_lst: Tensor
                 ) -> Tensor:
-        language_output = self.language_model(text_inputs_lst)
-        vision_output = self.vision_model(img_inputs_lst)
+        language_hidden_states = self.language_model(text_inputs_lst)
+        vision_hidden_states = self.vision_model(img_inputs_lst)
 
-        query_hidden_state = self.lang_cross_augment(language_output[0], vision_output)  
-        encode_hidden_state = self.vision_cross_augment(vision_output[0], language_output)  
+        ori_lang, aug_lang = language_hidden_states[0], language_hidden_states
+        ori_vision, aug_vision = vision_hidden_states[0], vision_hidden_states
 
-        for _ in range(self.config.query_layer):
-            query_hidden_state = self.language_query_attn(query_hidden_state, encode_hidden_state)  
+        for layer in range(self.config.cross_augment_layer):
+            ori_lang = self.lang_cross_augment[layer](ori_lang, aug_vision) 
+            ori_vision = self.vision_cross_augment[layer](ori_vision, aug_lang)
 
-        pooled_output = query_hidden_state[:, 0, :]
+        for query_attn_layer in self.query_attn:
+            ori_lang = query_attn_layer(ori_lang, ori_vision)  
+
+        pooled_output = ori_lang[:, 0, :]
         pooled_output = self.post_layernorm(pooled_output)
 
         logits = self.classifier(pooled_output)

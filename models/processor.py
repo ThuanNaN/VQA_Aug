@@ -1,12 +1,12 @@
 from transformers import AutoTokenizer, DeiTImageProcessor
 from .utils import dict_map
-from .configuration import LanguageConfig, VisionConfig
+from .configuration import VQAConfig
 
 
 class TextProcessorWrapper:
-    def __init__(self, config: LanguageConfig):
+    def __init__(self, config: VQAConfig):
         self.config = config
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(config.lang_model_name)
         self.dict_map = dict_map
 
     def __call__(self, text):
@@ -28,15 +28,12 @@ class TextProcessorWrapper:
         return text
 
 class VQAProcessor:
-    def __init__(self, 
-                 vision_config: VisionConfig = VisionConfig(), 
-                 language_config: LanguageConfig = LanguageConfig()):
-        self.vision_config = vision_config
-        self.language_config = language_config
+    def __init__(self, config: VQAConfig = VQAConfig()):
+        self.config = config
 
     def get_img_processor(self):
-        return DeiTImageProcessor.from_pretrained(self.vision_config.model_name)
+        return DeiTImageProcessor.from_pretrained(self.config.vis_model_name)
 
     def get_text_processor(self):
-        return TextProcessorWrapper(self.language_config)
+        return TextProcessorWrapper(self.config)
     
