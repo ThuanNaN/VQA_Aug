@@ -71,14 +71,17 @@ class LanguageModel(nn.Module):
                                                quantization_config=double_quant_config,
                                                low_cpu_mem_usage=True)
         base_model.config.use_cache = False
+
+        quantized_model = prepare_model_for_kbit_training(base_model, double_quant_config)
+
         lora_config = LoraConfig(
             r=config.lora_rank,
             lora_alpha=config.lora_alpha,
             target_modules=["k_proj", "v_proj", "q_proj", "out_proj"],
             lora_dropout=config.lora_dropout,
             bias="none")
-        peft_model = get_peft_model(base_model, lora_config)
-        self.model = prepare_model_for_kbit_training(peft_model, double_quant_config)
+        self.model = get_peft_model(quantized_model, lora_config)
+        self.model.print_trainable_parameters()
 
 
     def forward(self, inputs: list) -> List[Tensor]:
@@ -95,6 +98,9 @@ class VisionModel(nn.Module):
                                                quantization_config=double_quant_config,
                                                low_cpu_mem_usage=True)
         base_model.config.use_cache = False
+
+        quantized_model = prepare_model_for_kbit_training(base_model, double_quant_config)
+
         lora_config = LoraConfig(
             r=config.lora_rank,
             lora_alpha=config.lora_alpha,
@@ -102,8 +108,8 @@ class VisionModel(nn.Module):
             lora_dropout=config.lora_dropout,
             bias="none"
         )
-        peft_model = get_peft_model(base_model, lora_config)
-        self.model = prepare_model_for_kbit_training(peft_model, double_quant_config)
+        self.model  = get_peft_model(quantized_model, lora_config)
+        self.model.print_trainable_parameters()
 
 
     def forward(self, inputs: Tensor ) -> Tensor:
