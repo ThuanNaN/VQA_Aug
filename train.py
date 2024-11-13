@@ -50,7 +50,7 @@ class BaseTrainingConfig:
     wandb_name: str = "ViVQA_Aug"
     log_result: bool = True
     run_name: str = "exp"
-    save_ckpt: bool = True
+    save_ckpt: bool = False
     num_workers: int = 4
 
 
@@ -176,7 +176,7 @@ def train_model(
                 history["val_acc"].append(epoch_acc.item())
                 if epoch_acc > best_val_acc:
                     best_val_acc = epoch_acc
-                    best_model_wts = copy.deepcopy(model.state_dict())
+                    # best_model_wts = copy.deepcopy(model.state_dict())
                     if args.save_ckpt:
                         save_model_ckpt(model, DIR_SAVE, "best.pt")
                 else:
@@ -198,7 +198,7 @@ def train_model(
     LOGGER.info(f"Training complete in {time_elapsed // 3600}h {time_elapsed % 3600 // 60}m {time_elapsed % 60//1}s with {epochs} epochs")
     LOGGER.info(f"Best val Acc: {round(best_val_acc.item(), 6)}")
 
-    model.load_state_dict(best_model_wts)
+    # model.load_state_dict(best_model_wts)
     return model, best_val_acc.item(), history
 
 
