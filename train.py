@@ -30,11 +30,17 @@ LOGGER = logging.getLogger("VQA Training")
 @dataclass
 class BaseTrainingConfig:
     seed: int = 59
-    train_data_path: str = "./datasets/vivqa/20_filtered_question_paraphrases.csv"
+    # train_data_path: str = "./datasets/vivqa/30_filtered_question_paraphrases.csv"
+    train_data_path: str = "./datasets/vivqa/30_question_paraphrases.csv"
+    is_text_augment: bool = False
+    # is_text_augment: bool = True
+    use_dynamic_thresh: bool = False
+    # use_dynamic_thresh: bool = True
+    text_para_thresh: float = 0.6
+
     val_data_path: str = "./datasets/vivqa/test.csv"
-    is_text_augment: bool = True
     n_text_paras: int = 2
-    is_img_augment: bool = True
+    is_img_augment: bool = False
     n_img_augments: int = 2
     train_batch_size: int = 64
     val_batch_size: int = 64
@@ -209,6 +215,8 @@ def main():
     parser.add_argument('--train_data_path', type=str, default=base_config.train_data_path, help='Path to training data')
     parser.add_argument('--val_data_path', type=str, default=base_config.val_data_path, help='Path to validation data')
     parser.add_argument('--is_text_augment', type=bool, default=base_config.is_text_augment, help='Text augmentation')
+    parser.add_argument('--use_dynamic_thresh', type=bool, default=base_config.use_dynamic_thresh, help='Use dynamic threshold')
+    parser.add_argument('--text_para_thresh', type=float, default=base_config.text_para_thresh, help='Text paraphrase threshold')
     parser.add_argument('--n_text_paras', type=int, default=base_config.n_text_paras, help='Number of text paraphrases')
     parser.add_argument('--is_img_augment', type=bool, default=base_config.is_img_augment, help='Image augmentation')
     parser.add_argument('--n_img_augments', type=int, default=base_config.n_img_augments, help='Number of image augmentations')
@@ -258,6 +266,7 @@ def main():
                                  text_processor=text_processor,
                                  image_processor=image_processor,
                                  label_encoder=label2idx,
+                                 n_para_pool=30,
                                  is_text_augment=args.is_text_augment,
                                  n_text_paras=args.n_text_paras,
                                  is_img_augment=args.is_img_augment,
@@ -291,9 +300,9 @@ def main():
         projection_dim = 512,
         hidden_dim = 512,
         answer_space_len = answer_space_len,
-        is_text_augment = False,
-        use_dynamic_thresh = False,
-        text_para_thresh = 0.6
+        is_text_augment = args.is_text_augment,
+        use_dynamic_thresh = args.use_dynamic_thresh,
+        text_para_thresh = args.text_para_thresh
     )
 
     total_steps = len(train_loader) * args.epochs
