@@ -39,6 +39,7 @@ class BaseTrainingConfig:
     train_batch_size: int = 64
     val_batch_size: int = 64
     epochs: int = 50
+    patience: int = 5
     lr: float = 1e-4
     use_scheduler: bool = True
     warmup_steps: int = 500
@@ -112,6 +113,7 @@ def train_model(
             running_items = 0
             running_loss = 0.0
             running_corrects = 0
+            running_patience = 0
             _phase = tqdm(dataloaders[phase],
                           total=len(dataloaders[phase]),
                           bar_format='{desc} {percentage:>7.0f}%|{bar:10}{r_bar}{bar:-10b}',
@@ -177,6 +179,11 @@ def train_model(
                     best_model_wts = copy.deepcopy(model.state_dict())
                     if args.save_ckpt:
                         save_model_ckpt(model, DIR_SAVE, "best.pt")
+                else:
+                    running_patience += 1
+                    if running_patience > args.patience:
+                        LOGGER.info(f"Early stopping at epoch {epoch}")
+                        LOGGER.info(f"Best val Acc: {round(best_val_acc.item(), 6)}")
 
     if args.save_ckpt:
         save_model_ckpt(model, DIR_SAVE, "last.pt")
@@ -208,6 +215,7 @@ def main():
     parser.add_argument('--train_batch_size', type=int, default=base_config.train_batch_size, help='Training batch size')
     parser.add_argument('--val_batch_size', type=int, default=base_config.val_batch_size, help='Validation batch size')
     parser.add_argument('--epochs', type=int, default=base_config.epochs, help='Number of epochs')
+    parser.add_argument('--patience', type=int, default=base_config.patience, help='Patience for early stopping')
     parser.add_argument('--lr', type=float, default=base_config.lr, help='Learning rate')
     parser.add_argument('--use_scheduler', type=bool, default=base_config.use_scheduler, help='Use learning rate scheduler')
     parser.add_argument('--lr_min', type=float, default=base_config.lr_min, help='Minimum learning rate')
