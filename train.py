@@ -21,7 +21,7 @@ from torch import nn, optim
 import pytorch_warmup as warmup
 from data_loader import ViVQADataset
 from torch.utils.data import DataLoader
-from models import VQAModel, VQAProcessor
+from models import VQAModel, VQAProcessor, Light_ViVQAModel
 
 logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(format="%(message)s", level=logging.INFO)
@@ -286,8 +286,15 @@ def main():
         "val": test_loader
     }
 
-    model = VQAModel()
-    model.config.num_classes = answer_space_len
+    # model = VQAModel()
+    model = Light_ViVQAModel(
+        projection_dim = 512,
+        hidden_dim = 512,
+        answer_space_len = answer_space_len,
+        is_text_augment = False,
+        use_dynamic_thresh = False,
+        text_para_thresh = 0.6
+    )
 
     total_steps = len(train_loader) * args.epochs
     num_steps = total_steps - args.warmup_steps

@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer, DeiTImageProcessor
 from .utils import dict_map
 from .configuration import VQAConfig
-
+import timm
 
 class TextProcessorWrapper:
     def __init__(self, config: VQAConfig):
@@ -32,7 +32,22 @@ class VQAProcessor:
         self.config = config
 
     def get_img_processor(self):
-        return DeiTImageProcessor.from_pretrained(self.config.vis_model_name)
+        model_name = self.config.vis_model_name
+        if model_name == "facebook/deit-base-distilled-patch16-224":
+            return DeiTImageProcessor.from_pretrained(self.config.vis_model_name)
+        elif model_name ==  "beitv2_base_patch16_224.in1k_ft_in22k":
+            data_config = timm.data.resolve_model_data_config(
+                {
+                    'input_size': (3, 224, 224),
+                    'interpolation': 'bicubic',
+                    'mean': (0.485, 0.456, 0.406),
+                    'std': (0.229, 0.224, 0.225),
+                    'crop_pct': 0.9,
+                    'crop_mode': 'center'
+                }
+            )
+            transforms = timm.data.create_transform(**data_config, is_training=False)
+            return transforms
 
     def get_text_processor(self):
         return TextProcessorWrapper(self.config)
