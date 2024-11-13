@@ -30,8 +30,8 @@ LOGGER = logging.getLogger("VQA Training")
 @dataclass
 class BaseTrainingConfig:
     seed: int = 59
-    # train_data_path: str = "./datasets/vivqa/30_filtered_question_paraphrases.csv"
-    train_data_path: str = "./datasets/vivqa/30_question_paraphrases.csv"
+    # train_data_path: str = "./datasets/vivqa/30_filtered_paraphrases_train.csv"
+    train_data_path: str = "./datasets/vivqa/30_paraphrases_train.csv"
     is_text_augment: bool = False
     # is_text_augment: bool = True
     use_dynamic_thresh: bool = False
