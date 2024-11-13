@@ -266,7 +266,6 @@ def main():
                                  text_processor=text_processor,
                                  image_processor=image_processor,
                                  label_encoder=label2idx,
-                                 n_para_pool=30,
                                  is_text_augment=args.is_text_augment,
                                  n_text_paras=args.n_text_paras,
                                  is_img_augment=args.is_img_augment,
