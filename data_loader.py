@@ -52,7 +52,7 @@ class ViVQADataset(Dataset):
         if self.data_mode == 'train' and self.is_img_augment:
             augmented_imges = self.augment_images(img_pil, self.n_img_augments) 
             img_pil_lst.extend(augmented_imges)
-        img_inputs_lst = self.image_processor(img_pil_lst, return_tensors='pt').pixel_values
+        img_inputs_lst = [self.image_processor(img_pil) for img_pil in img_pil_lst]
 
         text_inputs_lst = [self.text_processor(question)]
         

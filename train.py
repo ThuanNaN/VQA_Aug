@@ -21,28 +21,34 @@ from torch import nn, optim
 import pytorch_warmup as warmup
 from data_loader import ViVQADataset
 from torch.utils.data import DataLoader
-from models import VQAModel, VQAProcessor, Light_ViVQAModel
+from models import VQAProcessor, Light_ViVQAModel, VQAConfig
 
 logging.getLogger().setLevel(logging.INFO)
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 LOGGER = logging.getLogger("VQA Training")
 
+
 @dataclass
 class BaseTrainingConfig:
-    seed: int = 59
+    vis_model_name: str = "timm/resnet18.a1_in1k"
+    # vis_model_name: str = "beitv2_base_patch16_224.in1k_ft_in22k"
+
+    lang_model_name: str = "vinai/bartpho-word"
+    # lang_model_name: str = "vinai/phobert-base"
+
     # train_data_path: str = "./datasets/vivqa/30_filtered_paraphrases_train.csv"
     train_data_path: str = "./datasets/vivqa/30_paraphrases_train.csv"
+
     is_text_augment: bool = False
-    # is_text_augment: bool = True
     use_dynamic_thresh: bool = False
-    # use_dynamic_thresh: bool = True
-    text_para_thresh: float = 0.6
+    text_para_thresh: float = 0.5
+    n_text_paras: int = 2
+    seed: int = 59
 
     val_data_path: str = "./datasets/vivqa/test.csv"
-    n_text_paras: int = 2
     is_img_augment: bool = False
     n_img_augments: int = 2
-    train_batch_size: int = 64
+    train_batch_size: int = 16
     val_batch_size: int = 64
     epochs: int = 30
     patience: int = 5
@@ -50,8 +56,7 @@ class BaseTrainingConfig:
     use_scheduler: bool = True
     warmup_steps: int = 500
     lr_min: float = 1e-6
-    weight_decay: float = 1e-4
-    use_amp: bool = False
+    use_amp: bool = True
     wandb_log: bool = False
     wandb_name: str = "ViVQA_Aug"
     log_result: bool = True
@@ -125,15 +130,18 @@ def train_model(
                           bar_format='{desc} {percentage:>7.0f}%|{bar:10}{r_bar}{bar:-10b}',
                           unit='batch')
             for batch in _phase:
+                # (n_aug, batch, length)
                 text_inputs_lst = [
                     {
                         k: v.squeeze().to(device, non_blocking=True)
                         for k, v in input_ids.items()
                     }
                     for input_ids in batch['text_inputs']
-                ]  # (n_aug, batch, length)
-                img_inputs_lst = batch['img_inputs'].to(device, non_blocking=True)  # (batch, n_aug, C, H, W)
-                labels = batch['labels'].to(device, non_blocking=True)  # (batch)
+                ]  
+                # (batch, n_aug, C, H, W)
+                img_inputs_lst = [img_input.to(device, non_blocking=True) for img_input in batch['img_inputs']]
+                # (batch)
+                labels = batch['labels'].to(device, non_blocking=True)  
 
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == "train"):
@@ -163,7 +171,7 @@ def train_model(
                 mem = f'{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}GB'
                 desc = ('%35s' + '%15.6g' * 2) % (mem, running_loss/running_items, running_corrects/running_items)
                 _phase.set_description_str(desc)
-                _phase.set_postfix_str(f"step: {warmup_scheduler.last_step}, lr: {batch_lr}")
+                # _phase.set_postfix_str(f"step: {warmup_scheduler.last_step}, lr: {batch_lr}")
 
             if phase == 'train':
                 if args.wandb_log:
@@ -182,6 +190,7 @@ def train_model(
                 history["val_acc"].append(epoch_acc.item())
                 if epoch_acc > best_val_acc:
                     best_val_acc = epoch_acc
+                    best_epoch = epoch
                     # best_model_wts = copy.deepcopy(model.state_dict())
                     if args.save_ckpt:
                         save_model_ckpt(model, DIR_SAVE, "best.pt")
@@ -190,6 +199,7 @@ def train_model(
                     if running_patience > args.patience:
                         LOGGER.info(f"Early stopping at epoch {epoch}")
                         LOGGER.info(f"Best val Acc: {round(best_val_acc.item(), 6)}")
+                        raise Exception("Early stopping")
 
     if args.save_ckpt:
         save_model_ckpt(model, DIR_SAVE, "last.pt")
@@ -212,6 +222,8 @@ def main():
     base_config = BaseTrainingConfig()
     parser = argparse.ArgumentParser(description='ViVQA Training Script')
     parser.add_argument('--seed', type=int, default=base_config.seed, help='Random seed')
+    parser.add_argument('--vis_model_name', type=str, default=base_config.vis_model_name, help='Vision model name')
+    parser.add_argument('--lang_model_name', type=str, default=base_config.lang_model_name, help='Language model name')
     parser.add_argument('--train_data_path', type=str, default=base_config.train_data_path, help='Path to training data')
     parser.add_argument('--val_data_path', type=str, default=base_config.val_data_path, help='Path to validation data')
     parser.add_argument('--is_text_augment', type=bool, default=base_config.is_text_augment, help='Text augmentation')
@@ -227,7 +239,6 @@ def main():
     parser.add_argument('--lr', type=float, default=base_config.lr, help='Learning rate')
     parser.add_argument('--use_scheduler', type=bool, default=base_config.use_scheduler, help='Use learning rate scheduler')
     parser.add_argument('--lr_min', type=float, default=base_config.lr_min, help='Minimum learning rate')
-    parser.add_argument('--weight_decay', type=float, default=base_config.weight_decay, help='Weight decay')
     parser.add_argument('--use_amp', type=bool, default=base_config.use_amp, help='Automatic Mixed Precision (AMP)')
     parser.add_argument('--wandb_log', type=bool, default=base_config.wandb_log, help='Log to Weights and Biases')
     parser.add_argument('--save_ckpt', type=bool, default=base_config.save_ckpt, help='Save best checkpoint')
@@ -258,8 +269,12 @@ def main():
         wandb = None
 
     label2idx, idx2label, answer_space_len = get_label_encoder()
-    text_processor = VQAProcessor().get_text_processor()
-    image_processor = VQAProcessor().get_img_processor()
+    vqa_config = VQAConfig()
+    vqa_config.vis_model_name = args.vis_model_name
+    vqa_config.lang_model_name = args.lang_model_name
+
+    text_processor = VQAProcessor(vqa_config).get_text_processor()
+    image_processor = VQAProcessor(vqa_config).get_img_processor()
 
     train_dataset = ViVQADataset(data_path=args.train_data_path,
                                  data_mode="train",
@@ -296,6 +311,8 @@ def main():
 
     # model = VQAModel()
     model = Light_ViVQAModel(
+        lang_model_name = args.lang_model_name,
+        vis_model_name = args.vis_model_name,
         projection_dim = 512,
         hidden_dim = 512,
         answer_space_len = answer_space_len,
@@ -307,9 +324,8 @@ def main():
     total_steps = len(train_loader) * args.epochs
     num_steps = total_steps - args.warmup_steps
 
-    optimizer = optim.Adam(model.parameters(),
-                     lr=args.lr,
-                     weight_decay=args.weight_decay)
+    # optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
     lr_scheduler, warmup_scheduler = None, None
     if args.use_scheduler:
