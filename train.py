@@ -14,7 +14,6 @@ from tqdm import tqdm
 import time
 import os
 import logging
-import copy
 import wandb
 import torch
 from torch import nn, optim
@@ -101,7 +100,7 @@ def train_model(
 
     history = {"train_loss": [], "train_acc": [],
                "val_loss": [], "val_acc": [], "lr": []}
-    best_model_wts = copy.deepcopy(model.state_dict())
+    # best_model_wts = copy.deepcopy(model.state_dict())
     best_val_acc = 0.0
     
     model = model.to(device)
