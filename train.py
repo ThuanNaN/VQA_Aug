@@ -44,7 +44,7 @@ class BaseTrainingConfig:
     n_img_augments: int = 2
     train_batch_size: int = 64
     val_batch_size: int = 64
-    epochs: int = 50
+    epochs: int = 30
     patience: int = 5
     lr: float = 1e-4
     use_scheduler: bool = True
